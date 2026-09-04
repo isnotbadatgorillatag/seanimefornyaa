@@ -1,0 +1,38 @@
+{
+  "id": "nyaa-custom",
+  "name": "Nyaa.si Custom",
+  "description": "Direct Nyaa.si anime torrent provider for Seanime.",
+  "manifestURI": "https://raw.githubusercontent.com/isnotbadatgorillatag/seanimefornyaa/main/manifest.json",
+  "version": "1.0.0",
+  "author": "isnotbadatgorillatag",
+  "type": "anime-torrent-provider",
+  "language": "typescript",
+  "lang": "en",
+  "readme": "",
+  "notes": "Directly scrapes nyaa.si. Use only for content you are authorized to obtain.",
+  "payload": "const BASE_URL = 'https://nyaa.si';\n\nfunction getMediaTitle(media) {\n  return media?.title?.romaji || media?.title?.english || media?.title?.native || media?.romajiTitle || media?.englishTitle || media?.nativeTitle || '';\n}\n\nfunction getSettings() {\n  return {\n    canSmartSearch: true,\n    smartSearchFilters: ['batch', 'episodeNumber', 'resolution', 'query'],\n    supportsAdult: false,\n    type: 'main'\n  };\n}\n\nfunction normalizeSize(value) {\n  if (!value) return 0;\n  const match = String(value).trim().match(/^([0-9.]+)\\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB|B)$/i);\n  if (!match) return 0;\n  const n = Number(match[1]);\n  const unit = match[2].toUpperCase();\n  const powers = { B: 0, KB: 1, MB: 2, GB: 3, TB: 4, KIB: 1, MIB: 2, GIB: 3, TIB: 4 };\n  return Math.round(n * Math.pow(unit.endsWith('IB') ? 1024 : 1000, powers[unit] || 0));\n}\n\nfunction parseTorrentName(name) {\n  const text = String(name || '');\n  const resolution = (text.match(/(?:^|[\\s._\\-\\[])(2160p|1440p|1080p|900p|720p|576p|480p|360p)(?:[\\s._\\-\\]]|$)/i) || [])[1] || '';\n  const batch = /(?:batch|complete|complete series|season(?:s)?)(?:[\\s._\\-]|$)/i.test(text);\n  let episodeNumber = -1;\n  const ep = text.match(/(?:^|[\\s._\\-\\[])[Ee](?:pisode)?[\\s._\\-]*(\\d{1,4})(?:[\\s._\\-\\]]|$)/i) || text.match(/(?:^|[\\s._\\-\\[])\\d{1,3}\\s*(?:[-~])\\s*\\d{1,3}(?:[\\s._\\-\\]]|$)/);\n  if (ep && ep[1]) episodeNumber = Number(ep[1]);\n  const group = (text.match(/^\\[([^\\]]+)\\]/) || [])[1] || '';\n  return { resolution, episodeNumber, batch, releaseGroup: group };\n}\n\nfunction buildUrl(query, category, trustedOnly) {\n  const params = new URLSearchParams();\n  params.set('f', trustedOnly ? '2' : '0');\n  params.set('c', category || '1_2');\n  if (query) params.set('q', query);\n  params.set('s', 'seeders');\n  params.set('o', 'desc');\n  return BASE_URL + '/?' + params.toString();\n}\n\nasync function fetchAndParse(query, category, trustedOnly) {\n  const html = await fetch(buildUrl(query, category, trustedOnly)).then(r => r.text());\n  const doc = LoadDoc(html);\n  const rows = doc.select('table.torrent-list tbody tr');\n  const results = [];\n  for (const row of rows) {\n    const cells = row.select('td');\n    if (!cells || cells.length < 8) continue;\n    const titleLink = row.selectFirst('td:nth-child(2) a:not(.comments)');\n    if (!titleLink) continue;\n    const name = titleLink.text().trim();\n    const torrentLink = row.selectFirst('a.torrent');\n    const magnetLink = row.selectFirst('a[href^=magnet:]');\n    const sizeText = cells[3]?.text()?.trim() || '';\n    const dateText = cells[4]?.attr('data-timestamp') || '';\n    const seeders = Number(cells[5]?.text()?.trim() || 0);\n    const leechers = Number(cells[6]?.text()?.trim() || 0);\n    const downloads = Number(cells[7]?.text()?.trim() || 0);\n    const parsed = parseTorrentName(name);\n    const link = titleLink.attr('href') || '';\n    results.push({\n      provider: 'nyaa-custom',\n      name,\n      date: dateText ? new Date(Number(dateText) * 1000) : new Date(),\n      size: normalizeSize(sizeText),\n      formattedSize: sizeText,\n      seeders,\n      leechers,\n      downloadCount: downloads,\n      link: link.startsWith('http') ? link : BASE_URL + link,\n      downloadUrl: torrentLink?.attr('href') || '',\n      magnetLink: magnetLink?.attr('href') || '',\n      infoHash: '',\n      resolution: parsed.resolution,\n      isBatch: parsed.batch,\n      episodeNumber: parsed.episodeNumber,\n      releaseGroup: parsed.releaseGroup,\n      isBestRelease: false\n    });\n  }\n  return results;\n}\n\nasync function search(opts) {\n  const query = opts?.query || '';\n  return fetchAndParse(query, opts?.userConfig?.category || '1_2', opts?.userConfig?.trustedOnly === true);\n}\n\nasync function smartSearch(opts) {\n  const title = getMediaTitle(opts?.media);\n  let query = title;\n  if (opts?.episodeNumber != null && opts.episodeNumber > 0) query += ' ' + opts.episodeNumber;\n  if (opts?.resolution) query += ' ' + opts.resolution;\n  const results = await fetchAndParse(query, opts?.userConfig?.category || '1_2', opts?.userConfig?.trustedOnly === true);\n  return results.filter(x => {\n    if (opts?.episodeNumber != null && opts.episodeNumber > 0 && !x.isBatch && x.episodeNumber > 0 && x.episodeNumber !== Number(opts.episodeNumber)) return false;\n    if (opts?.resolution && x.resolution && x.resolution.toLowerCase() !== String(opts.resolution).toLowerCase()) return false;\n    return true;\n  });\n}\n\nasync function getLatest(opts) {\n  return fetchAndParse('', opts?.userConfig?.category || '1_2', opts?.userConfig?.trustedOnly === true);\n}\n\nasync function getTorrentMagnetLink(torrent) {\n  return torrent?.magnetLink || '';\n}\n\nasync function getTorrentInfoHash(torrent) {\n  const magnet = torrent?.magnetLink || '';\n  const match = magnet.match(/btih:([^&/]+)/i);\n  return match ? decodeURIComponent(match[1]).toLowerCase() : '';\n}\n\nreturn { getSettings, search, smartSearch, getLatest, getTorrentMagnetLink, getTorrentInfoHash };",
+  "userConfig": {
+    "requiresConfig": true,
+    "version": 1,
+    "fields": [
+      {
+        "name": "category",
+        "label": "Nyaa category",
+        "type": "select",
+        "default": "1_2",
+        "options": [
+          { "label": "All anime", "value": "1_0" },
+          { "label": "English subtitles", "value": "1_2" },
+          { "label": "Non-English subtitles", "value": "1_3" },
+          { "label": "Raw", "value": "1_4" }
+        ]
+      },
+      {
+        "name": "trustedOnly",
+        "label": "Only trusted uploaders",
+        "type": "switch",
+        "default": false
+      }
+    ]
+  }
+}
