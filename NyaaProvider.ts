@@ -48,6 +48,61 @@ class Provider implements AnimeProvider {
         return this.parseHtml(await res.text())
     }
 
+    private parseSize(sizeText: string): number {
+        const match = sizeText.trim().match(/([0-9]+(?:\.[0-9]+)?)\s*(B|KiB|MiB|GiB|TiB|KB|MB|GB|TB)/i)
+        if (!match) return 0
+
+        const value = parseFloat(match[1])
+        const unit = match[2].toUpperCase()
+        const multipliers: { [key: string]: number } = {
+            B: 1,
+            KB: 1000,
+            MB: 1000 ** 2,
+            GB: 1000 ** 3,
+            TB: 1000 ** 4,
+            KIB: 1024,
+            MIB: 1024 ** 2,
+            GIB: 1024 ** 3,
+            TIB: 1024 ** 4,
+        }
+        return Math.round(value * (multipliers[unit] || 1))
+    }
+
+    private parseResolution(name: string): string {
+        const standard = name.match(/\b(2160|1440|1080|900|720|576|480|360)p\b/i)
+        if (standard) return `${standard[1]}p`
+
+        if (/\b4K\b/i.test(name) || /\bUHD\b/i.test(name) || /\b3840x2160\b/i.test(name)) return "2160p"
+        if (/\b1920x1080\b/i.test(name)) return "1080p"
+        if (/\b1280x720\b/i.test(name)) return "720p"
+        if (/\b854x480\b/i.test(name)) return "480p"
+        if (/\b640x360\b/i.test(name)) return "360p"
+
+        return ""
+    }
+
+    private parseEpisode(name: string): number {
+        const seasonEpisode = name.match(/\bS\d{1,2}[ ._-]*E\d{1,4}\b/i)
+        if (seasonEpisode) {
+            const match = seasonEpisode[0].match(/E(\d{1,4})/i)
+            return match ? parseInt(match[1], 10) : -1
+        }
+
+        const episode = name.match(/(?:^|[\s._\-\[])E(?:pisode)?[ ._-]?(\d{1,4})(?:$|[\s._\-\]])/i)
+        if (episode) return parseInt(episode[1], 10)
+
+        return -1
+    }
+
+    private parseMediaFlags(name: string): { isDub: boolean, isSub: boolean } {
+        const lower = name.toLowerCase()
+
+        const isDub = /\b(dual[ -]?audio|dual[ -]?dub|dubbed|english[ -]?dub|multi[ -]?audio|multi[ -]?dub)\b/i.test(lower)
+        const isSub = /\b(subbed|subs?|multi[ -]?subs?|multi[ -]?subtitles?|english[ -]?subs?|eng[ -]?subs?)\b/i.test(lower)
+
+        return { isDub, isSub }
+    }
+
     private parseHtml(html: string): AnimeTorrent[] {
         const torrents: AnimeTorrent[] = []
         const $ = LoadDoc(html)
@@ -65,18 +120,19 @@ class Provider implements AnimeProvider {
             const torrentHref = links.find("a[href$='.torrent']").attr("href") || ""
             const magnetLink = links.find("a[href^='magnet:']").attr("href") || ""
             const sizeText = cells.eq(3).text().trim()
+            const size = this.parseSize(sizeText)
             const timestamp = cells.eq(4).attr("data-timestamp") || ""
             const date = timestamp ? new Date(parseInt(timestamp, 10) * 1000).toISOString() : new Date().toISOString()
             const seeders = parseInt(cells.eq(5).text().trim(), 10) || 0
             const leechers = parseInt(cells.eq(6).text().trim(), 10) || 0
             const downloadCount = parseInt(cells.eq(7).text().trim(), 10) || 0
-            const resolutionMatch = name.match(/\b(360|480|576|720|900|1080|1440|2160)p\b/i)
-            const resolution = resolutionMatch ? `${resolutionMatch[1]}p` : ""
-            const episodeMatch = name.match(/(?:^|[\s._\-\[])E(?:pisode)?[ ._-]?(\d{1,4})(?:$|[\s._\-\]])/i)
-            const episodeNumber = episodeMatch ? parseInt(episodeMatch[1], 10) : -1
-            const isBatch = /\b(batch|complete|complete series)\b/i.test(name)
+
+            const resolution = this.parseResolution(name)
+            const episodeNumber = this.parseEpisode(name)
+            const isBatch = /\b(batch|complete|complete series|full series|collection)\b/i.test(name)
             const groupMatch = name.match(/^\[([^\]]+)\]/)
             const releaseGroup = groupMatch ? groupMatch[1] : ""
+            const mediaFlags = this.parseMediaFlags(name)
             const hashMatch = magnetLink.match(/btih:([a-zA-Z0-9]+)/i)
             const infoHash = hashMatch ? hashMatch[1].toUpperCase() : ""
 
@@ -84,7 +140,7 @@ class Provider implements AnimeProvider {
                 provider: "nyaa-custom",
                 name,
                 date,
-                size: 0,
+                size,
                 formattedSize: sizeText,
                 seeders,
                 leechers,
@@ -98,7 +154,8 @@ class Provider implements AnimeProvider {
                 episodeNumber,
                 releaseGroup,
                 isBestRelease: false,
-            } as AnimeTorrent)
+                confirmed: true,
+            } as AnimeTorrent & { confirmed: boolean })
         })
         return torrents
     }
