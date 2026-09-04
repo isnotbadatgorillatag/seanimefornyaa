@@ -8,16 +8,26 @@ class Provider implements AnimeProvider {
         }
     }
 
+    private asString(value: any): string {
+        if (value === null || value === undefined) return ""
+        if (typeof value === "string") return value
+        return String(value)
+    }
+
     async search(opts: AnimeSearchOptions): Promise<AnimeTorrent[]> {
-        const query = opts.query?.trim() || this.getMediaTitle(opts.media)
+        const suppliedQuery = this.asString(opts && opts.query).trim()
+        const query = suppliedQuery || this.getMediaTitle(opts && opts.media)
         return await this.fetchAndParse(query)
     }
 
     async smartSearch(opts: AnimeSmartSearchOptions): Promise<AnimeTorrent[]> {
-        let query = opts.query?.trim() || this.getMediaTitle(opts.media)
-        if (opts.resolution) query = `${query} ${opts.resolution}`
-        if (opts.batch) query = `${query} batch`
-        if (opts.episodeNumber && opts.episodeNumber > 0) query = `${query} ${opts.episodeNumber}`
+        let query = this.asString(opts && opts.query).trim() || this.getMediaTitle(opts && opts.media)
+        const resolution = this.asString(opts && opts.resolution).trim()
+        if (resolution) query = `${query} ${resolution}`
+        if (opts && opts.batch) query = `${query} batch`
+        if (opts && typeof opts.episodeNumber === "number" && opts.episodeNumber > 0) {
+            query = `${query} ${opts.episodeNumber}`
+        }
         return await this.fetchAndParse(query)
     }
 
@@ -26,59 +36,61 @@ class Provider implements AnimeProvider {
     }
 
     async getTorrentMagnetLink(torrent: AnimeTorrent): Promise<string> {
-        return torrent.magnetLink || ""
+        return this.asString(torrent && torrent.magnetLink)
     }
 
     async getTorrentInfoHash(torrent: AnimeTorrent): Promise<string> {
-        if (torrent.infoHash) return torrent.infoHash
-        const match = (torrent.magnetLink || "").match(/btih:([a-zA-Z0-9]+)/i)
+        const existing = this.asString(torrent && torrent.infoHash).trim()
+        if (existing) return existing
+        const magnet = this.asString(torrent && torrent.magnetLink)
+        const match = magnet.match(/btih:([a-zA-Z0-9]+)/i)
         return match ? match[1].toUpperCase() : ""
     }
 
     private getMediaTitle(media: Media): string {
-        return media?.title?.romaji || media?.title?.english || media?.title?.native || ""
+        if (!media || !media.title) return ""
+        const title = media.title as any
+        return this.asString(title.romaji) || this.asString(title.english) || this.asString(title.native)
     }
 
     private buildUrl(query: string): string {
-        const params = new URLSearchParams()
-        params.set("f", "0")
-        params.set("c", "1_2")
-        if (query) params.set("q", query)
-        params.set("s", "seeders")
-        params.set("o", "desc")
-        return `https://nyaa.si/?${params.toString()}`
+        const q = this.asString(query).trim()
+        let url = "https://nyaa.si/?f=0&c=1_2&s=seeders&o=desc"
+        if (q) url += `&q=${encodeURIComponent(q)}`
+        return url
     }
 
     private async fetchAndParse(query: string): Promise<AnimeTorrent[]> {
         const res = await fetch(this.buildUrl(query), { method: "get" })
-        if (!res.ok) return []
-        return this.parseHtml(await res.text())
+        if (!res || !res.ok) return []
+        const html = await res.text()
+        return this.parseHtml(this.asString(html))
     }
 
     private parseHtml(html: string): AnimeTorrent[] {
         const torrents: AnimeTorrent[] = []
-        const $ = LoadDoc(html)
+        const $ = LoadDoc(this.asString(html))
         $("table.torrent-list tbody tr").each((_i: number, el: any) => {
             const row = $(el)
             const cells = row.find("td")
             if (cells.length < 8) return
 
             const titleLink = cells.eq(1).find("a").first()
-            const name = (titleLink.attr("title") || titleLink.text() || "").trim()
-            const viewHref = titleLink.attr("href") || ""
+            const name = this.asString(titleLink.attr("title") || titleLink.text()).trim()
+            const viewHref = this.asString(titleLink.attr("href")).trim()
             if (!name || !viewHref) return
 
             const link = viewHref.startsWith("http") ? viewHref : `https://nyaa.si${viewHref}`
             const links = cells.eq(2)
-            const torrentHref = links.find("a[href$='.torrent']").attr("href") || ""
+            const torrentHref = this.asString(links.find("a[href$='.torrent']").attr("href")).trim()
             const downloadUrl = torrentHref ? (torrentHref.startsWith("http") ? torrentHref : `https://nyaa.si${torrentHref}`) : ""
-            const magnetLink = links.find("a[href^='magnet:']").attr("href") || ""
-            const sizeText = cells.eq(3).text().trim()
-            const timestamp = cells.eq(4).attr("data-timestamp")
+            const magnetLink = this.asString(links.find("a[href^='magnet:']").attr("href")).trim()
+            const sizeText = this.asString(cells.eq(3).text()).trim()
+            const timestamp = this.asString(cells.eq(4).attr("data-timestamp")).trim()
             const date = timestamp ? new Date(parseInt(timestamp, 10) * 1000).toISOString() : new Date().toISOString()
-            const seeders = parseInt(cells.eq(5).text().trim(), 10) || 0
-            const leechers = parseInt(cells.eq(6).text().trim(), 10) || 0
-            const downloadCount = parseInt(cells.eq(7).text().trim(), 10) || 0
+            const seeders = parseInt(this.asString(cells.eq(5).text()).trim(), 10) || 0
+            const leechers = parseInt(this.asString(cells.eq(6).text()).trim(), 10) || 0
+            const downloadCount = parseInt(this.asString(cells.eq(7).text()).trim(), 10) || 0
             const resolutionMatch = name.match(/\b(360|480|576|720|900|1080|1440|2160)p\b/i)
             const resolution = resolutionMatch ? `${resolutionMatch[1]}p` : ""
             const episodeMatch = name.match(/(?:^|[\s._\-\[])E(?:pisode)?[ ._-]?(\d{1,4})(?:$|[\s._\-\]])/i)
