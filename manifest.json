@@ -1,7 +1,7 @@
 {
   "id": "nyaa-custom",
   "name": "Nyaa.si Custom",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "manifestURI": "https://raw.githubusercontent.com/isnotbadatgorillatag/seanimefornyaa/main/manifest.json",
   "language": "typescript",
   "type": "anime-torrent-provider",
@@ -10,7 +10,7 @@
   "icon": "",
   "website": "https://nyaa.si",
   "readme": "",
-  "notes": "Direct Nyaa.si provider.",
+  "notes": "Direct Nyaa.si provider with torrent metadata parsing.",
   "lang": "multi",
   "payloadURI": "https://raw.githubusercontent.com/isnotbadatgorillatag/seanimefornyaa/main/NyaaProvider.ts"
 }
