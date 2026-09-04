@@ -8,26 +8,16 @@ class Provider implements AnimeProvider {
         }
     }
 
-    private asString(value: any): string {
-        if (value === null || value === undefined) return ""
-        if (typeof value === "string") return value
-        return String(value)
-    }
-
     async search(opts: AnimeSearchOptions): Promise<AnimeTorrent[]> {
-        const suppliedQuery = this.asString(opts && opts.query).trim()
-        const query = suppliedQuery || this.getMediaTitle(opts && opts.media)
+        const query = opts.query || opts.media.RomajiTitle || (opts.media.EnglishTitle || "")
         return await this.fetchAndParse(query)
     }
 
     async smartSearch(opts: AnimeSmartSearchOptions): Promise<AnimeTorrent[]> {
-        let query = this.asString(opts && opts.query).trim() || this.getMediaTitle(opts && opts.media)
-        const resolution = this.asString(opts && opts.resolution).trim()
-        if (resolution) query = `${query} ${resolution}`
-        if (opts && opts.batch) query = `${query} batch`
-        if (opts && typeof opts.episodeNumber === "number" && opts.episodeNumber > 0) {
-            query = `${query} ${opts.episodeNumber}`
-        }
+        let query = opts.query || opts.media.RomajiTitle || (opts.media.EnglishTitle || "")
+        if (opts.resolution) query += ` ${opts.resolution}p`
+        if (opts.batch) query += " batch"
+        if (opts.episodeNumber > 0) query += ` ${opts.episodeNumber}`
         return await this.fetchAndParse(query)
     }
 
@@ -36,61 +26,50 @@ class Provider implements AnimeProvider {
     }
 
     async getTorrentMagnetLink(torrent: AnimeTorrent): Promise<string> {
-        return this.asString(torrent && torrent.magnetLink)
+        return torrent.magnetLink || ""
     }
 
     async getTorrentInfoHash(torrent: AnimeTorrent): Promise<string> {
-        const existing = this.asString(torrent && torrent.infoHash).trim()
-        if (existing) return existing
-        const magnet = this.asString(torrent && torrent.magnetLink)
+        if (torrent.infoHash) return torrent.infoHash
+        const magnet = torrent.magnetLink || ""
         const match = magnet.match(/btih:([a-zA-Z0-9]+)/i)
         return match ? match[1].toUpperCase() : ""
     }
 
-    private getMediaTitle(media: Media): string {
-        if (!media || !media.title) return ""
-        const title = media.title as any
-        return this.asString(title.romaji) || this.asString(title.english) || this.asString(title.native)
-    }
-
     private buildUrl(query: string): string {
-        const q = this.asString(query).trim()
         let url = "https://nyaa.si/?f=0&c=1_2&s=seeders&o=desc"
-        if (q) url += `&q=${encodeURIComponent(q)}`
+        if (query) url += `&q=${encodeURIComponent(query)}`
         return url
     }
 
     private async fetchAndParse(query: string): Promise<AnimeTorrent[]> {
         const res = await fetch(this.buildUrl(query), { method: "get" })
         if (!res || !res.ok) return []
-        const html = await res.text()
-        return this.parseHtml(this.asString(html))
+        return this.parseHtml(await res.text())
     }
 
     private parseHtml(html: string): AnimeTorrent[] {
         const torrents: AnimeTorrent[] = []
-        const $ = LoadDoc(this.asString(html))
-        $("table.torrent-list tbody tr").each((_i: number, el: any) => {
-            const row = $(el)
+        const $ = LoadDoc(html)
+
+        $("table.torrent-list tbody tr").each((_i: number, row: any) => {
             const cells = row.find("td")
             if (cells.length < 8) return
 
             const titleLink = cells.eq(1).find("a").first()
-            const name = this.asString(titleLink.attr("title") || titleLink.text()).trim()
-            const viewHref = this.asString(titleLink.attr("href")).trim()
+            const name = titleLink.attr("title") || titleLink.text()
+            const viewHref = titleLink.attr("href") || ""
             if (!name || !viewHref) return
 
-            const link = viewHref.startsWith("http") ? viewHref : `https://nyaa.si${viewHref}`
             const links = cells.eq(2)
-            const torrentHref = this.asString(links.find("a[href$='.torrent']").attr("href")).trim()
-            const downloadUrl = torrentHref ? (torrentHref.startsWith("http") ? torrentHref : `https://nyaa.si${torrentHref}`) : ""
-            const magnetLink = this.asString(links.find("a[href^='magnet:']").attr("href")).trim()
-            const sizeText = this.asString(cells.eq(3).text()).trim()
-            const timestamp = this.asString(cells.eq(4).attr("data-timestamp")).trim()
+            const torrentHref = links.find("a[href$='.torrent']").attr("href") || ""
+            const magnetLink = links.find("a[href^='magnet:']").attr("href") || ""
+            const sizeText = cells.eq(3).text().trim()
+            const timestamp = cells.eq(4).attr("data-timestamp") || ""
             const date = timestamp ? new Date(parseInt(timestamp, 10) * 1000).toISOString() : new Date().toISOString()
-            const seeders = parseInt(this.asString(cells.eq(5).text()).trim(), 10) || 0
-            const leechers = parseInt(this.asString(cells.eq(6).text()).trim(), 10) || 0
-            const downloadCount = parseInt(this.asString(cells.eq(7).text()).trim(), 10) || 0
+            const seeders = parseInt(cells.eq(5).text().trim(), 10) || 0
+            const leechers = parseInt(cells.eq(6).text().trim(), 10) || 0
+            const downloadCount = parseInt(cells.eq(7).text().trim(), 10) || 0
             const resolutionMatch = name.match(/\b(360|480|576|720|900|1080|1440|2160)p\b/i)
             const resolution = resolutionMatch ? `${resolutionMatch[1]}p` : ""
             const episodeMatch = name.match(/(?:^|[\s._\-\[])E(?:pisode)?[ ._-]?(\d{1,4})(?:$|[\s._\-\]])/i)
@@ -110,8 +89,8 @@ class Provider implements AnimeProvider {
                 seeders,
                 leechers,
                 downloadCount,
-                link,
-                downloadUrl,
+                link: viewHref.startsWith("http") ? viewHref : `https://nyaa.si${viewHref}`,
+                downloadUrl: torrentHref ? (torrentHref.startsWith("http") ? torrentHref : `https://nyaa.si${torrentHref}`) : "",
                 magnetLink,
                 infoHash,
                 resolution,
