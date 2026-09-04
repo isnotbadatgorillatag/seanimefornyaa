@@ -1,38 +1,16 @@
 {
   "id": "nyaa-custom",
   "name": "Nyaa.si Custom",
-  "description": "Direct Nyaa.si anime torrent provider for Seanime.",
-  "manifestURI": "",
-  "version": "1.0.1",
-  "author": "isnotbadatgorillatag",
-  "type": "anime-torrent-provider",
+  "version": "1.0.2",
+  "manifestURI": "https://raw.githubusercontent.com/isnotbadatgorillatag/seanimefornyaa/main/manifest.json",
   "language": "typescript",
-  "lang": "en",
+  "type": "anime-torrent-provider",
+  "description": "Direct Nyaa.si anime torrent provider for Seanime.",
+  "author": "isnotbadatgorillatag",
+  "icon": "",
+  "website": "https://nyaa.si",
   "readme": "",
-  "notes": "Direct Nyaa.si HTML provider.",
-  "payload": "const DEFAULT_CATEGORY = \"{{category}}\"\nconst TRUSTED_ONLY = \"{{trustedOnly}}\"\nconst BASE_URL = \"https://nyaa.si\"\n\nclass Provider implements AnimeProvider {\n    getSettings(): AnimeProviderSettings {\n        return {\n            canSmartSearch: true,\n            smartSearchFilters: [\"batch\", \"episodeNumber\", \"resolution\"],\n            supportsAdult: false,\n            type: \"main\",\n        }\n    }\n\n    async search(opts: AnimeSearchOptions): Promise<AnimeTorrent[]> {\n        const query = opts.query?.trim() || this.getMediaTitle(opts.media)\n        return await this.fetchAndParse(query)\n    }\n\n    async smartSearch(opts: AnimeSmartSearchOptions): Promise<AnimeTorrent[]> {\n        let query = opts.query?.trim() || this.getMediaTitle(opts.media)\n        if (opts.resolution) query = `${query} ${opts.resolution}`\n        if (opts.batch) query = `${query} batch`\n        if (opts.episodeNumber && opts.episodeNumber > 0) query = `${query} ${opts.episodeNumber}`\n        return await this.fetchAndParse(query)\n    }\n\n    async getLatest(): Promise<AnimeTorrent[]> {\n        return await this.fetchAndParse(\"\")\n    }\n\n    async getTorrentMagnetLink(torrent: AnimeTorrent): Promise<string> {\n        return torrent.magnetLink || \"\"\n    }\n\n    async getTorrentInfoHash(torrent: AnimeTorrent): Promise<string> {\n        if (torrent.infoHash) return torrent.infoHash\n        const match = (torrent.magnetLink || \"\").match(/btih:([a-zA-Z0-9]+)/i)\n        return match ? match[1].toUpperCase() : \"\"\n    }\n\n    private getMediaTitle(media: Media): string {\n        return media?.title?.romaji || media?.title?.english || media?.title?.native || \"\"\n    }\n\n    private buildUrl(query: string): string {\n        const category = DEFAULT_CATEGORY && !DEFAULT_CATEGORY.includes(\"{{\") ? DEFAULT_CATEGORY : \"1_2\"\n        const filter = TRUSTED_ONLY === \"true\" ? \"2\" : \"0\"\n        const params = new URLSearchParams()\n        params.set(\"f\", filter)\n        params.set(\"c\", category)\n        if (query) params.set(\"q\", query)\n        params.set(\"s\", \"seeders\")\n        params.set(\"o\", \"desc\")\n        return `${BASE_URL}/?${params.toString()}`\n    }\n\n    private async fetchAndParse(query: string): Promise<AnimeTorrent[]> {\n        const res = await fetch(this.buildUrl(query), { method: \"get\" })\n        if (!res.ok) return []\n        return this.parseHtml(await res.text())\n    }\n\n    private parseHtml(html: string): AnimeTorrent[] {\n        const torrents: AnimeTorrent[] = []\n        const $ = LoadDoc(html)\n        $(\"table.torrent-list tbody tr\").each((_i: number, el: any) => {\n            const row = $(el)\n            const cells = row.find(\"td\")\n            if (cells.length < 8) return\n\n            const titleLink = cells.eq(1).find(\"a\").first()\n            const name = (titleLink.attr(\"title\") || titleLink.text() || \"\").trim()\n            const viewHref = titleLink.attr(\"href\") || \"\"\n            if (!name || !viewHref) return\n\n            const link = viewHref.startsWith(\"http\") ? viewHref : `${BASE_URL}${viewHref}`\n            const links = cells.eq(2)\n            const torrentHref = links.find(\"a[href$='.torrent']\").attr(\"href\") || \"\"\n            const downloadUrl = torrentHref ? (torrentHref.startsWith(\"http\") ? torrentHref : `${BASE_URL}${torrentHref}`) : \"\"\n            const magnetLink = links.find(\"a[href^='magnet:']\").attr(\"href\") || \"\"\n            const sizeText = cells.eq(3).text().trim()\n            const timestamp = cells.eq(4).attr(\"data-timestamp\")\n            const date = timestamp ? new Date(parseInt(timestamp, 10) * 1000).toISOString() : new Date().toISOString()\n            const seeders = parseInt(cells.eq(5).text().trim(), 10) || 0\n            const leechers = parseInt(cells.eq(6).text().trim(), 10) || 0\n            const downloadCount = parseInt(cells.eq(7).text().trim(), 10) || 0\n            const resolutionMatch = name.match(/\\b(360|480|576|720|900|1080|1440|2160)p\\b/i)\n            const resolution = resolutionMatch ? `${resolutionMatch[1]}p` : \"\"\n            const episodeMatch = name.match(/(?:^|[\\s._\\-\\[])E(?:pisode)?[ ._-]?(\\d{1,4})(?:$|[\\s._\\-\\]])/i)\n            const episodeNumber = episodeMatch ? parseInt(episodeMatch[1], 10) : -1\n            const isBatch = /\\b(batch|complete|complete series)\\b/i.test(name)\n            const groupMatch = name.match(/^\\[([^\\]]+)\\]/)\n            const releaseGroup = groupMatch ? groupMatch[1] : \"\"\n            const hashMatch = magnetLink.match(/btih:([a-zA-Z0-9]+)/i)\n            const infoHash = hashMatch ? hashMatch[1].toUpperCase() : \"\"\n\n            torrents.push({\n                provider: \"nyaa-custom\",\n                name,\n                date,\n                size: 0,\n                formattedSize: sizeText,\n                seeders,\n                leechers,\n                downloadCount,\n                link,\n                downloadUrl,\n                magnetLink,\n                infoHash,\n                resolution,\n                isBatch,\n                episodeNumber,\n                releaseGroup,\n                isBestRelease: false,\n            } as AnimeTorrent)\n        })\n        return torrents\n    }\n}\n",
-  "userConfig": {
-    "requiresConfig": false,
-    "version": 1,
-    "fields": [
-      {
-        "name": "category",
-        "label": "Nyaa category",
-        "type": "select",
-        "default": "1_2",
-        "options": [
-          { "label": "All anime", "value": "1_0" },
-          { "label": "English subtitles", "value": "1_2" },
-          { "label": "Non-English subtitles", "value": "1_3" },
-          { "label": "Raw", "value": "1_4" }
-        ]
-      },
-      {
-        "name": "trustedOnly",
-        "label": "Only trusted uploaders",
-        "type": "switch",
-        "default": "false"
-      }
-    ]
-  }
+  "notes": "Direct Nyaa.si provider.",
+  "lang": "multi",
+  "payloadURI": "https://raw.githubusercontent.com/isnotbadatgorillatag/seanimefornyaa/main/NyaaProvider.ts"
 }
