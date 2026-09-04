@@ -1,7 +1,7 @@
 {
   "id": "nyaa-custom",
   "name": "Nyaa.si Custom",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "manifestURI": "https://raw.githubusercontent.com/isnotbadatgorillatag/seanimefornyaa/main/manifest.json",
   "language": "typescript",
   "type": "anime-torrent-provider",
